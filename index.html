@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pentax Meter - Stable</title>
+    <style>
+        body { background-color: #000; color: #fff; font-family: sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; user-select: none; }
+        
+        #ui-menu { margin-bottom: 20px; }
+        select { padding: 8px 16px; background: #222; color: #fff; border: 1px solid #555; border-radius: 4px; font-weight: bold; cursor: pointer; }
+
+        .meter-container { display: flex; flex-direction: column; align-items: center; width: 100%; }
+
+        .meter-frame { height: 90px; overflow: hidden; position: relative; background: #222; border: 2px solid #333; border-radius: 4px; margin-bottom: 4px; transition: width 0.2s; }
+        .reflectance-container { height: 40px; position: relative; background: #fff; border: 2px solid #ccc; border-radius: 4px; overflow: hidden; transition: width 0.2s; }
+        
+        .meter-frame, .reflectance-container, .index-container { width: 530px; }
+
+        .sticky-label { position: absolute; font-weight: bold; font-size: 12px; z-index: 20; pointer-events: none; line-height: 1; }
+        .index-container { display: flex; flex-direction: column; align-items: center; color: #32d74b; font-size: 12px; font-weight: bold; margin-bottom: 5px; transition: width 0.2s; }
+        .pointer-triangle { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 12px solid #32d74b; }
+        .ring-window { width: 100%; height: 90px; position: relative; cursor: grab; }
+        .track { display: flex; position: absolute; height: 100%; top: 0; margin-left: -10px; will-change: transform; }
+        
+        .strip { display: flex; height: 45px; }
+        .strip-bottom { border-top: 1px solid #333; }
+        .tick-box { width: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .top-edge-box { justify-content: flex-start; }
+        .bottom-edge-box { justify-content: flex-end; }
+        
+        .tick.minor { width: 4px; height: 4px; border-radius: 50%; background: #aaa; margin: 2px 0; }
+        .tick.major { width: 2px; height: 10px; }
+        .tick.orange-tick { width: 3px; height: 10px; background: #ff9f0a; }
+        .tick.hidden { background: transparent !important; }
+        .label { font-size: 10px; font-weight: bold; line-height: 1; }
+        
+        .color-green { color: #32d74b; } .bg-color-green { background: #32d74b !important; }
+        .color-yellow { color: #ffd60a; } .bg-color-yellow { background: #ffd60a !important; }
+        .color-white { color: #fff; } .bg-color-white { background: #fff !important; }
+        .color-blue { color: #64d2ff; } .bg-color-blue { background: #64d2ff !important; }
+        .color-orange { color: #ff9f0a; } .bg-color-orange { background: #ff9f0a !important; }
+
+        .ref-item { position: absolute; display: flex; flex-direction: column; align-items: center; font-size: 10px; font-weight: bold; color: #000; top: 0; transform: translateX(-50%); }
+        .red-triangle { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 12px solid #ff3b30; margin-bottom: 2px; }
+        .black-line { height: 12px; background: #000; margin-bottom: 2px; }
+        .signature { position: absolute; right: 8px; bottom: 2px; font-size: 8px; color: #888; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-menu">
+        <select id="mode-selector" onchange="switchMode()">
+            <option value="compact">Compact View</option>
+            <option value="wide">Wide View</option>
+        </select>
+    </div>
+
+    <div id="meter-container" class="meter-container">
+        <div class="index-container" id="index-node">
+            EI / ASA / ISO
+            <div class="pointer-triangle"></div>
+        </div>
+
+        <div class="meter-frame" id="frame1">
+            <div class="sticky-label" style="left: 5px; top: 45px; margin-top: 4px; color: #fff;">T</div>
+            <div class="ring-window" id="window1">
+                <div class="track" id="track1">
+                    <div style="display: flex; flex-direction: column;">
+                        <div class="strip" id="iso-strip"></div>
+                        <div class="strip strip-bottom" id="shutter-strip"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="meter-frame" id="frame2">
+            <div class="sticky-label" style="left: 5px; bottom: 45px; margin-bottom: 4px; color: #64d2ff;">F</div>
+            <div class="sticky-label" style="left: 5px; top: 45px; margin-top: 4px; color: #ff9f0a;">EV</div>
+            <div class="ring-window" id="window2">
+                <div class="track" id="track2">
+                    <div style="display: flex; flex-direction: column;">
+                        <div class="strip" id="aperture-strip"></div>
+                        <div class="strip strip-bottom" id="ev-strip"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="reflectance-container" id="reflectance-labels">
+            <div class="signature">by Bruno Grandino</div>
+        </div>
+    </div>
+
+<script>
+    const TICK_W = 20;
+    const INITIAL_OFFSET = 265; // Matches half of 530px
+    const makePad = (count) => Array(count).fill({ isHidden: true });
+    
+    window.onload = () => {
+        const shutters = [ {v:"4000", c:"color-white"}, {}, {}, {v:"2000", c:"color-white"}, {}, {}, {v:"1000", c:"color-white"}, {}, {}, {v:"500", c:"color-white"}, {}, {}, {v:"250", c:"color-white"}, {}, {}, {v:"125", c:"color-white"}, {}, {}, {v:"60", c:"color-white"}, {isOrange: true}, {}, {v:"30", c:"color-white"}, {}, {}, {v:"15", c:"color-white"}, {}, {}, {v:"8", c:"color-white"}, {}, {}, {v:"4", c:"color-white"}, {}, {}, {v:"2", c:"color-white"}, {}, {}, {v:"1", c:"color-yellow"}, {mc:"bg-color-yellow"}, {mc:"bg-color-yellow"}, {v:"2", c:"color-yellow"}, {mc:"bg-color-yellow"}, {mc:"bg-color-yellow"}, {v:"4", c:"color-yellow"}, {mc:"bg-color-yellow"}, {mc:"bg-color-yellow"}, {v:"8", c:"color-yellow"}, {mc:"bg-color-yellow"}, {mc:"bg-color-yellow"}, {v:"15", c:"color-yellow"}, {mc:"bg-color-yellow"}, {mc:"bg-color-yellow"}, {v:"30", c:"color-yellow"}, {mc:"bg-color-yellow"}, {mc:"bg-color-yellow"}, {v:"1m", c:"color-yellow"}, {mc:"bg-color-yellow"}, {mc:"bg-color-yellow"}, {v:"2m", c:"color-yellow"}, {mc:"bg-color-yellow"}, {mc:"bg-color-yellow"}, {v:"4m", c:"color-yellow"} ];
+        const rawIsos = ["6400","3200","1600","800","400","200","100","50","25","12","6"];
+        const isos = [...makePad(3)]; rawIsos.forEach((val, i) => { isos.push({v: val, c: "color-green"}); if (i < rawIsos.length - 1) { isos.push({mc: "bg-color-green"}, {mc: "bg-color-green"}); }});
+        const rawApertures = ["1","1.4","2","2.8","4","5.6","8","11","16","22","32","45","64","90","128"];
+        const apertures = [...makePad(12)]; rawApertures.forEach((val, i) => { apertures.push({v: val, c: "color-blue"}); if (i < rawApertures.length - 1) { apertures.push({mc: "bg-color-blue"}, {mc: "bg-color-blue"}); }});
+        let evs = []; for(let i = 1; i <= 19; i++) { evs.push({v: i.toString(), c: 'color-orange'}, {mc: 'bg-color-orange'}, {mc: 'bg-color-orange'}); }
+
+        function buildStrip(id, data, top) {
+            const c = document.getElementById(id);
+            data.forEach(item => {
+                const b = document.createElement('div');
+                b.className = `tick-box ${top ? 'top-edge-box' : 'bottom-edge-box'}`;
+                const t = document.createElement('div');
+                t.className = item.isHidden ? 'tick hidden' : (item.isOrange ? 'tick orange-tick' : (item.v ? `tick major ${item.c?.replace('color-','bg-color-') || 'bg-color-white'}` : `tick minor ${item.mc || ''}`));
+                const l = document.createElement('div');
+                l.className = `label ${item.c || ''}`; l.innerText = item.v || '';
+                top ? (b.appendChild(t), b.appendChild(l)) : (b.appendChild(l), b.appendChild(t));
+                c.appendChild(b);
+            });
+        }
+        buildStrip('iso-strip', isos, true); buildStrip('shutter-strip', shutters, false); buildStrip('aperture-strip', apertures, true); buildStrip('ev-strip', evs, false);
+
+        // Apply initial alignment
+        const t1 = document.getElementById('track1'), t2 = document.getElementById('track2');
+        t1.style.left = `${INITIAL_OFFSET}px`;
+        t2.style.left = `${INITIAL_OFFSET}px`;
+
+        const refScale = [{text:"1", offset:-240}, {text:"2", offset:-180}, {text:"4", offset:-120}, {text:"9", offset:-60}, {text:"18", offset:0, isRedTriangle:true}, {text:"25", offset:28.38, isSmall:true}, {text:"36", offset:60}, {text:"72", offset:120}, {text:"100", offset:148.38}];
+        const refContainer = document.getElementById('reflectance-labels');
+        refScale.forEach(item => {
+            const el = document.createElement('div'); el.className = 'ref-item'; el.style.left = `calc(50% + ${item.offset}px)`;
+            el.innerHTML = `${item.isRedTriangle ? '<div class="red-triangle"></div>' : `<div class="black-line" style="width:${item.isSmall ? '1px' : '2px'};"></div>`}<div style="${item.isSmall ? 'font-size:8px;' : ''}">${item.text}</div>`;
+            refContainer.appendChild(el);
+        });
+
+        setupDrag('window1', 'track1'); setupDrag('window2', 'track2');
+    };
+
+    function switchMode() {
+        const mode = document.getElementById('mode-selector').value;
+        const w = (mode === 'wide') ? '1060px' : '530px';
+        const trackLeft = (mode === 'wide') ? '530px' : '265px';
+        
+        document.querySelectorAll('.meter-frame, .index-container, .reflectance-container').forEach(el => el.style.width = w);
+        document.getElementById('track1').style.left = trackLeft;
+        document.getElementById('track2').style.left = trackLeft;
+    }
+
+    function setupDrag(wId, tId) {
+        const w = document.getElementById(wId), t = document.getElementById(tId);
+        let curX = 0, drag = false, start = 0;
+        w.addEventListener('mousedown', e => { drag = true; start = e.clientX - curX; t.style.transition = 'none'; });
+        window.addEventListener('mousemove', e => { if(drag) { curX = e.clientX - start; t.style.transform = `translateX(${curX}px)`; }});
+        window.addEventListener('mouseup', () => { if(drag) { drag = false; curX = Math.round(curX / TICK_W) * TICK_W; t.style.transition = '0.2s'; t.style.transform = `translateX(${curX}px)`; }});
+    }
+</script>
+</body>
+</html>
